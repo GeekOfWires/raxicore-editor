@@ -9,9 +9,10 @@ using RaxicoreEditor.EngineAssets.Surfaces;
 /// The pak's first entry (<c>mapNN.srf</c>) is a small chunky AsciiDatabase carrying the ordered
 /// surface-type NAME list (a per-continent <c>groundcover</c> resource); every other entry is a
 /// <c>mapNN&lt;CC&gt;&lt;RR&gt;.srf</c> tile of 128x128 cells whose <c>type</c> byte indexes that
-/// list. We name-match the volcanic lava types (<c>lava</c> / <c>volcanic_scorched</c> /
-/// <c>SCORCHED</c>) at the grid's native 2-world-unit resolution, then downsample to the requested
-/// mask (a cell is set if ANY sub-cell is lava).
+/// list. We name-match the <c>lava</c> surface at the grid's native 2-world-unit resolution, then
+/// downsample by COVERAGE: an output cell is lava only when enough of its sub-cells are. Lava is a
+/// fine, sparse feature (0.17% of Searhus), so an "any sub-cell wins" downsample would inflate a
+/// single 2-unit cell into a whole 16-unit block and produce fat, wrong-shaped pools.
 ///
 /// The open sea is NOT a surface type here (ocean floor is typed <c>*_shore</c>), so the coastline
 /// still comes from the terrain heightfield; this only supplies the on-land lava overlay. (The
@@ -32,12 +33,17 @@ internal sealed class ContinentSurface
         var lavaTypes = new HashSet<int>();
         for (int i = 0; i < names.Length; i++)
         {
-            string s = names[i];
-            if (s == "lava" || s == "volcanic_scorched" || s == "SCORCHED" || s == "molten") lavaTypes.Add(i);
+            // ONLY the `lava` surface is molten lava. The volcanic_scorched / SCORCHED surfaces are
+            // burnt GROUND around the volcanoes, not lava -- on Searhus they cover 3.1% of the map
+            // against lava's 0.17%, so including them over-paints the pools ~18x.
+            if (names[i] == "lava") lavaTypes.Add(i);
         }
 
-        var lava = new bool[n * n];
+        // Count lava sub-cells per output cell, then threshold on coverage.
+        var lavaCount = new int[n * n];
         int cell = worldSize / n;
+        int subPerCell = (cell / 2) * (cell / 2);            // .srf cells are 2 world units
+        int minCover = Math.Max(1, subPerCell / 4);          // >=25% of the cell is lava
 
         foreach (var e in pak.Entries)
         {
@@ -62,7 +68,7 @@ internal sealed class ContinentSurface
                     if (!lavaTypes.Contains(tile.GetCell(r, c).Type)) continue;
                     int wx = col * 256 + c * 2;          // grid col -> world +X (east)
                     int gi = Math.Min(n - 1, wx / cell);
-                    lava[gj * n + gi] = true;
+                    lavaCount[gj * n + gi]++;
                 }
             }
         }
@@ -71,7 +77,7 @@ internal sealed class ContinentSurface
         int lc = 0;
         for (int m = 0; m < n * n; m++)
         {
-            if (lava[m]) { lavaPacked[m >> 3] |= (byte)(1 << (m & 7)); lc++; }
+            if (lavaCount[m] >= minCover) { lavaPacked[m >> 3] |= (byte)(1 << (m & 7)); lc++; }
         }
 
         return new ContinentSurface { N = n, LavaCells = lc, LavaMask = lavaPacked };
