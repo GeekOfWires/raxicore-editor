@@ -44,13 +44,20 @@ Directory.CreateDirectory(outDir);
 // that the packed bitmask stays ~8 KB per continent.
 const int MaskN = 256;
 
+// The surface (lava/road) masks come from the 2-unit .srf grid; sample them finer so thin roads and
+// lava edges survive. 512 -> 16 world units per cell.
+const int SurfaceN = 512;
+
+// The .srf surface grids and the .mpo object lists live alongside the .ubr in the reference folder.
+string mapResources = Path.Combine(planetside, "maps", "map_resources.pak");
+
 // Overworld continents ship a loose mapNN.ubr. (Battle islands live under patchmap/ and are not
 // part of the portal's continent list, so they are skipped when their .ubr is absent.)
 var mapUbr = new Regex(@"^map(\d{2})\.ubr$", RegexOptions.IgnoreCase);
 int exported = 0;
 
-Console.WriteLine($"{"continent",-10} {"tiles",6} {"sea",7} {"water%",7}  grid");
-Console.WriteLine(new string('-', 52));
+Console.WriteLine($"{"continent",-10} {"tiles",6} {"sea",7} {"water%",7}  overlays");
+Console.WriteLine(new string('-', 60));
 
 foreach (var ubrPath in Directory.EnumerateFiles(planetside, "map*.ubr").OrderBy(x => x))
 {
@@ -63,6 +70,20 @@ foreach (var ubrPath in Directory.EnumerateFiles(planetside, "map*.ubr").OrderBy
     try { terrain = ContinentTerrain.Build(ubrPath, MaskN); }
     catch (Exception e) { Console.Error.WriteLine($"skip {file}: {e.Message}"); continue; }
 
+    // Lava/road overlays from the per-tile surface grids (optional -- skip if the pak is absent).
+    ContinentSurface? surface = null;
+    string srfPak = Path.Combine(planetside, baseName + "_srf.pak");
+    if (File.Exists(srfPak))
+    {
+        try { surface = ContinentSurface.Build(srfPak, baseName, SurfaceN, terrain.WorldSize); }
+        catch (Exception e) { Console.Error.WriteLine($"  {baseName} surface: {e.Message}"); }
+    }
+
+    // Bridge deck polylines from the object list (optional).
+    var bridges = File.Exists(mapResources)
+        ? ContinentBridges.Build(mapResources, baseName)
+        : new List<List<float[]>>();
+
     var doc = new
     {
         @base = baseName,
@@ -71,7 +92,12 @@ foreach (var ubrPath in Directory.EnumerateFiles(planetside, "map*.ubr").OrderBy
         maskN = terrain.N,
         // Row-major (j*N + i) bit-packed water mask, base64. bit set == below sea level (water).
         // i indexes world +X (east), j indexes world +Y (north).
-        mask = Convert.ToBase64String(terrain.PackedMask)
+        mask = Convert.ToBase64String(terrain.PackedMask),
+        // Lava overlay: same bit-packing at surfaceN resolution. Absent -> null.
+        surfaceN = surface?.N,
+        lava = surface != null ? Convert.ToBase64String(surface.LavaMask) : null,
+        // Bridge deck runs as [[x,y],...] world-coord polylines.
+        bridges = bridges
     };
 
     File.WriteAllText(Path.Combine(outDir, baseName + ".json"),
@@ -79,7 +105,8 @@ foreach (var ubrPath in Directory.EnumerateFiles(planetside, "map*.ubr").OrderBy
     exported++;
 
     Console.WriteLine($"{baseName,-10} {terrain.TileCount,6} {terrain.SeaLevel,7:F1} " +
-                      $"{100.0 * terrain.WaterCells / (terrain.N * terrain.N),6:F0}%  {terrain.N}x{terrain.N}");
+                      $"{100.0 * terrain.WaterCells / (terrain.N * terrain.N),6:F0}%  " +
+                      $"lava={surface?.LavaCells ?? 0,6} bridges={bridges.Count,3}");
 }
 
 Console.WriteLine(new string('-', 52));
