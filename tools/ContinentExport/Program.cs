@@ -1,9 +1,19 @@
-// Continent map-grid exporter.
+// Continent terrain exporter.
 //
-// Reads each continent's `contents_mapNN.mpo` (via the reference client's map-resources PAK
-// archives) and emits one JSON file per continent describing the coarse 32-wide cell grid:
-// which cells are water, which are lakes/lava, and which are terrain sections. This is the
-// data the PSFPortal continent modal renders as an SVG.
+// Reads each continent's `mapNN.ubr` (the reference client's per-tile terrain mesh) via the
+// faithful UberModel decoder and emits one JSON file per continent describing a coarse water
+// mask: for each cell of an `N x N` grid over the continent, whether the terrain there sits
+// below sea level (the flat `_oc` ocean-plane height baked into the same `.ubr`).
+//
+// This is the data the PSFPortal continent modal turns into a coastline (ocean = transparent,
+// inland water = blue) behind the facility/SOI overlay. Ocean-vs-lake classification and the
+// marching-squares contouring happen downstream in scripts/build-continents.mjs.
+//
+// Why the mesh and not `contents_mapNN.mpo`: the MPO's `map_water` layer only flags tiles that
+// carry an `_oc` water-plane record (coast, rivers and lakes alike -- ~74% of tiles), so it does
+// NOT separate ocean from land. The real silhouette is in the per-tile terrain heights, thresholded
+// at the `_oc` plane -- verified: the plane is a single flat Z per map (map03 = 29.5) and all 1024
+// tiles decode.
 //
 // Usage:
 //   dotnet run --project tools/ContinentExport -- --planetside <PlanetSideDir> --out <OutDir>
@@ -12,8 +22,6 @@
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using RaxicoreEditor.EngineAssets.Archives;
-using RaxicoreEditor.EngineAssets.Maps;
 
 static string? Arg(string[] a, string name)
 {
@@ -31,81 +39,49 @@ if (planetside.Length == 0 || outDir.Length == 0)
 
 Directory.CreateDirectory(outDir);
 
-// The overworld continents (map01..map15) share one archive; each battle island ships its own.
-var paks = new List<string>();
-string overworld = Path.Combine(planetside, "maps", "map_resources.pak");
-if (File.Exists(overworld)) paks.Add(overworld);
-foreach (var d in Directory.EnumerateDirectories(Path.Combine(planetside, "patchmap")).OrderBy(x => x))
-{
-    foreach (var p in Directory.EnumerateFiles(d, "*_resources.pak")) paks.Add(p);
-}
+// Resolution of the exported water mask, in cells per axis. 256 -> 32 world units per cell on a
+// full 8192 continent: fine enough for a smooth coastline after downstream contouring, small enough
+// that the packed bitmask stays ~8 KB per continent.
+const int MaskN = 256;
 
-var mpoName = new Regex(@"^contents_(map\d+)\.mpo$", RegexOptions.IgnoreCase);
+// Overworld continents ship a loose mapNN.ubr. (Battle islands live under patchmap/ and are not
+// part of the portal's continent list, so they are skipped when their .ubr is absent.)
+var mapUbr = new Regex(@"^map(\d{2})\.ubr$", RegexOptions.IgnoreCase);
 int exported = 0;
 
-Console.WriteLine($"{"continent",-10} {"water",7} {"lakes",7} {"sections",9} {"objects",8}  grid");
-Console.WriteLine(new string('-', 60));
+Console.WriteLine($"{"continent",-10} {"tiles",6} {"sea",7} {"water%",7}  grid");
+Console.WriteLine(new string('-', 52));
 
-foreach (var pakPath in paks)
+foreach (var ubrPath in Directory.EnumerateFiles(planetside, "map*.ubr").OrderBy(x => x))
 {
-    PakArchive pak;
-    try { pak = PakArchive.Load(File.ReadAllBytes(pakPath)); }
-    catch (Exception e) { Console.Error.WriteLine($"skip {pakPath}: {e.Message}"); continue; }
+    string file = Path.GetFileName(ubrPath);
+    var m = mapUbr.Match(file);
+    if (!m.Success) continue;
+    string baseName = "map" + m.Groups[1].Value;
 
-    foreach (var entry in pak.Entries)
+    ContinentTerrain terrain;
+    try { terrain = ContinentTerrain.Build(ubrPath, MaskN); }
+    catch (Exception e) { Console.Error.WriteLine($"skip {file}: {e.Message}"); continue; }
+
+    var doc = new
     {
-        var m = mpoName.Match(entry.Name);
-        if (!m.Success) continue;
-        string baseName = m.Groups[1].Value.ToLowerInvariant();
+        @base = baseName,
+        worldSize = terrain.WorldSize,
+        sea = terrain.SeaLevel,
+        maskN = terrain.N,
+        // Row-major (j*N + i) bit-packed water mask, base64. bit set == below sea level (water).
+        // i indexes world +X (east), j indexes world +Y (north).
+        mask = Convert.ToBase64String(terrain.PackedMask)
+    };
 
-        MpoFile mpo;
-        try { mpo = MpoFile.Parse(pak.Extract(entry.Name)); }
-        catch (Exception e) { Console.Error.WriteLine($"skip {entry.Name}: {e.Message}"); continue; }
+    File.WriteAllText(Path.Combine(outDir, baseName + ".json"),
+        JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = false }));
+    exported++;
 
-        // Grid dimensions come from map_sections + map_water, the two layers confirmed to pack as
-        // (col = id & 0x1F, row = id >> 5). map_lakes does NOT use that packing -- its payload
-        // unpacks to nonsense rows (~25M), so it is per-lake geometry, not a cell grid, and is not
-        // lava. Lava lives in the per-tile surface (.srf) data, not the MPO, so it is not exported
-        // here.
-        int maxCol = 0, maxRow = 0;
-        void Bounds(IReadOnlyList<uint> ids)
-        {
-            foreach (var id in ids)
-            {
-                var (c, r) = MpoFile.UnpackCell(id);
-                if (c > maxCol) maxCol = c;
-                if (r > maxRow) maxRow = r;
-            }
-        }
-        Bounds(mpo.TerrainTileIds);
-        Bounds(mpo.WaterCellIds);
-
-        int cols = maxCol + 1;
-        int rows = maxRow + 1;
-
-        static int[][] Cells(IReadOnlyList<uint> ids) =>
-            ids.Select(id => { var (c, r) = MpoFile.UnpackCell(id); return new[] { c, r }; }).ToArray();
-
-        var doc = new
-        {
-            @base = baseName,
-            cols,
-            rows,
-            worldSize = 8192,
-            cell = 8192 / Math.Max(cols, rows),
-            water = Cells(mpo.WaterCellIds),
-            sections = Cells(mpo.TerrainTileIds)
-        };
-
-        string outPath = Path.Combine(outDir, baseName + ".json");
-        File.WriteAllText(outPath, JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = false }));
-        exported++;
-
-        Console.WriteLine($"{baseName,-10} {mpo.WaterCellIds.Count,7} {mpo.LakeCellIds.Count,7} " +
-                          $"{mpo.TerrainTileIds.Count,9} {mpo.Objects.Count,8}  {cols}x{rows}");
-    }
+    Console.WriteLine($"{baseName,-10} {terrain.TileCount,6} {terrain.SeaLevel,7:F1} " +
+                      $"{100.0 * terrain.WaterCells / (terrain.N * terrain.N),6:F0}%  {terrain.N}x{terrain.N}");
 }
 
-Console.WriteLine(new string('-', 60));
+Console.WriteLine(new string('-', 52));
 Console.WriteLine($"exported {exported} continents to {outDir}");
 return 0;
