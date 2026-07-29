@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RaxicoreEditor.EngineAssets\RaxicoreEditor.EngineAssets.csproj" />
+    <ProjectReference Include="..\RaxicoreEditor.Generation\RaxicoreEditor.Generation.csproj" />
   </ItemGroup>
 
   <ItemGroup>

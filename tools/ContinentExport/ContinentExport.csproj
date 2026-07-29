@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\RaxicoreEditor.EngineAssets\RaxicoreEditor.EngineAssets.csproj" />
+    <ProjectReference Include="..\..\src\RaxicoreEditor.Generation\RaxicoreEditor.Generation.csproj" />
   </ItemGroup>
 
 </Project>

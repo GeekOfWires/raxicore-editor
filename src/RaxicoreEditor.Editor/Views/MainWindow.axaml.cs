@@ -177,6 +177,96 @@ namespace RaxicoreEditor.Editor.Views
             }
         }
 
+        // --- Generate ------------------------------------------------------------------------------
+        // Each item opens a fresh tab pre-filled with a best guess at the PlanetSide folder (the most
+        // recently mounted one, if any) rather than asking the user to browse to it every time; nothing
+        // runs until they click that tab's own Run button.
+
+        private void OnGenerateContinentExport(object? sender, RoutedEventArgs e)
+        {
+            _vm.AddDocument(new ContinentExportDocument(GuessPlanetSideDir()));
+        }
+
+        private void OnGenerateListRecords(object? sender, RoutedEventArgs e)
+        {
+            _vm.AddDocument(new ListRecordsDocument(GuessPlanetSideDir()));
+        }
+
+        private string GuessPlanetSideDir()
+        {
+            for (int i = _vm.Roots.Count - 1; i >= 0; i--)
+            {
+                if (!string.IsNullOrEmpty(_vm.Roots[i].FullPath))
+                {
+                    return _vm.Roots[i].FullPath;
+                }
+            }
+            return "";
+        }
+
+        private async Task<string?> PickFolderAsync(string title, string? suggestedStartLocation = null)
+        {
+            var options = new FolderPickerOpenOptions { Title = title, AllowMultiple = false };
+            if (!string.IsNullOrEmpty(suggestedStartLocation) && Directory.Exists(suggestedStartLocation))
+            {
+                options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(suggestedStartLocation);
+            }
+            IReadOnlyList<IStorageFolder> folders = await StorageProvider.OpenFolderPickerAsync(options);
+            return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        }
+
+        private async void OnBrowseContinentExportPlanetSide(object? sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.DataContext is not ContinentExportDocument doc)
+            {
+                return;
+            }
+            string? path = await PickFolderAsync("PlanetSide reference client folder", doc.PlanetSideDir);
+            if (path is not null)
+            {
+                doc.PlanetSideDir = path;
+            }
+        }
+
+        private async void OnBrowseContinentExportOutput(object? sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.DataContext is not ContinentExportDocument doc)
+            {
+                return;
+            }
+            string? path = await PickFolderAsync("Continent JSON output folder", doc.OutputDir);
+            if (path is not null)
+            {
+                doc.OutputDir = path;
+            }
+        }
+
+        private async void OnBrowseContinentExportTerrainOutput(object? sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.DataContext is not ContinentExportDocument doc)
+            {
+                return;
+            }
+            string? path = await PickFolderAsync("Terrain height output folder", doc.TerrainOutputDir);
+            if (path is not null)
+            {
+                doc.TerrainOutputDir = path;
+            }
+        }
+
+        private async void OnBrowseListRecordsPlanetSide(object? sender, RoutedEventArgs e)
+        {
+            if ((sender as Button)?.DataContext is not ListRecordsDocument doc)
+            {
+                return;
+            }
+            string? path = await PickFolderAsync("PlanetSide reference client folder", doc.PlanetSideDir);
+            if (path is not null)
+            {
+                doc.PlanetSideDir = path;
+            }
+        }
+
         private async void OnExport(object? sender, RoutedEventArgs e)
         {
             DocumentBase? doc = _vm.SelectedDocument;
