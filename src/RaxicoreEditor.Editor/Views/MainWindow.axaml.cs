@@ -9,6 +9,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using RaxicoreEditor.Editor.Documents;
+using RaxicoreEditor.Editor.Rendering;
 using RaxicoreEditor.Editor.Theming;
 using RaxicoreEditor.Editor.Updates;
 using RaxicoreEditor.Editor.ViewModels;
@@ -35,6 +36,21 @@ namespace RaxicoreEditor.Editor.Views
             SyncModelDetailChecks(RenderSettings.Detail);
             EngineShadingItem.IsChecked = RenderSettings.EngineShading;
             SkyItem.IsChecked = RenderSettings.Sky;
+
+            // Real hardware/driver capability probe (see VulkanContext.SupportsRayTracing) -- the menu
+            // item only turns on if the GPU actually reports both acceleration-structure and ray-tracing-
+            // pipeline feature bits, not just the extension being listed.
+            RenderSettings.RayTracingSupported = VulkanContext.TryGetShared()?.SupportsRayTracing ?? false;
+            _vm.Log($"GPU ray tracing: {(RenderSettings.RayTracingSupported ? "supported" : "not supported")}.");
+            RayTracingItem.IsEnabled = RenderSettings.RayTracingSupported;
+            // Opt-in only, deliberately: RenderSettings.RayTracing/EditorSettings.RayTracing both default to
+            // false and nothing here ever forces them on just because the hardware supports it -- the user
+            // has to check the menu item themselves, same as any other render toggle.
+            RayTracingItem.IsChecked = RenderSettings.RayTracingSupported && RenderSettings.RayTracing;
+            ToolTip.SetTip(RayTracingItem, RenderSettings.RayTracingSupported
+                ? "Render via hardware ray tracing instead of rasterizing. Opaque static geometry only for now -- skinned/animated meshes and translucent surfaces still rasterize."
+                : "This GPU/driver does not report hardware ray tracing support (VK_KHR_acceleration_structure + VK_KHR_ray_tracing_pipeline).");
+
             SetUpFrameRateMenu();
             AutoUpdateItem.IsChecked = (Application.Current as App)?.Settings.AutoCheckForUpdates ?? true;
 
@@ -133,6 +149,18 @@ namespace RaxicoreEditor.Editor.Views
             // Per-frame render setting — no geometry rebuild, just nudge open viewports to redraw.
             RenderSettings.RaiseChanged();
             _vm.Log($"Sky: {(RenderSettings.Sky ? "on" : "off")}.");
+        }
+
+        private void OnToggleRayTracing(object? sender, RoutedEventArgs e)
+        {
+            RenderSettings.RayTracing = RayTracingItem.IsChecked;
+            if (Application.Current is App app)
+            {
+                app.Settings.RayTracing = RenderSettings.RayTracing;
+                app.Settings.Save();
+            }
+            RenderSettings.RaiseChanged();
+            _vm.Log($"Ray tracing: {(RenderSettings.RayTracing ? "on" : "off")}.");
         }
 
         private async void OnOpenFolder(object? sender, RoutedEventArgs e)

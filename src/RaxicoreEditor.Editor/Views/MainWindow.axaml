@@ -107,6 +107,8 @@
                   ToggleType="CheckBox" x:Name="SkyItem"
                   IsVisible="{Binding ActiveDocumentHasSky}"
                   ToolTip.Tip="Draw this continent's procedural sky (horizon/sky/sun from its engine lighting cycle) behind the scene." />
+        <MenuItem Header="Ray Tracing" Click="OnToggleRayTracing"
+                  ToggleType="CheckBox" x:Name="RayTracingItem" />
         <Separator />
         <MenuItem x:Name="FrameRateMenu"
                   ToolTip.Tip="Cap how fast the 3D viewport renders. Rates above your monitor's refresh are disabled — they'd render frames the display can't show.">

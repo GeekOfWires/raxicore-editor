@@ -63,6 +63,15 @@ namespace RaxicoreEditor.Editor.Documents
         /// hard alpha-test discard.</summary>
         public bool IsTranslucent { get; internal set; }
 
+        /// <summary>A second, more finely-tiled texture blended over the base albedo (materials.adb's
+        /// <c>mat_detail</c> — terrain, and some doors/trees). <see cref="DetailTileRate"/> is how much more
+        /// densely it repeats than the base UV (materials.adb's <c>mat_tilerate</c>; terrain's is 16).</summary>
+        public byte[]? DetailTextureBgra { get; internal set; }
+        public int DetailTextureWidth { get; internal set; }
+        public int DetailTextureHeight { get; internal set; }
+        public float DetailTileRate { get; internal set; } = 1f;
+        public bool HasDetailTexture => DetailTextureBgra != null && DetailTextureWidth > 0 && DetailTextureHeight > 0;
+
         /// <summary>Swap this submesh's texture (used by the per-material picker / empire swap).</summary>
         public void ApplyTexture(DdsImage? dds, string? name)
         {
@@ -1639,6 +1648,10 @@ namespace RaxicoreEditor.Editor.Documents
                 TextureHeight = s.TextureHeight,
                 TextureName = s.TextureName,
                 IsTranslucent = s.IsTranslucent,
+                DetailTextureBgra = s.DetailTextureBgra,
+                DetailTextureWidth = s.DetailTextureWidth,
+                DetailTextureHeight = s.DetailTextureHeight,
+                DetailTileRate = s.DetailTileRate,
             };
         }
 
@@ -1912,6 +1925,9 @@ namespace RaxicoreEditor.Editor.Documents
                         texBgra = ForceOpaqueAlpha(texBgra);
                     }
                 }
+
+                var detail = textures.ResolveDetail(Material);
+
                 return new MeshSubmesh
                 {
                     Material = Material,
@@ -1923,6 +1939,10 @@ namespace RaxicoreEditor.Editor.Documents
                     TextureHeight = texH,
                     TextureName = texName,
                     IsTranslucent = translucent,
+                    DetailTextureBgra = detail?.Bgra,
+                    DetailTextureWidth = detail?.Width ?? 0,
+                    DetailTextureHeight = detail?.Height ?? 0,
+                    DetailTileRate = detail?.TileRate ?? 1f,
                     BoneA = AnySkin ? SkinA.ToArray() : null,
                     BoneB = AnySkin ? SkinB.ToArray() : null,
                     Weight = AnySkin ? SkinW.ToArray() : null,

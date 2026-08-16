@@ -83,15 +83,87 @@ namespace RaxicoreEditor.EngineAssets.Textures
                 br.ReadByte();            // NUL terminator
                 uint dataLen = br.ReadUInt32();
                 long dataOffset = fs.Position;
-                fs.Seek(dataLen, SeekOrigin.Current); // skip the payload
 
                 string key = ToKey(Encoding.Latin1.GetString(nameBytes));
-                if (key.Length > 0 && !_index.ContainsKey(key))
+                if (key.Length == 0)
+                {
+                    fs.Seek(dataOffset + dataLen, SeekOrigin.Begin);
+                    continue;
+                }
+
+                if (!_index.TryGetValue(key, out Entry existing))
                 {
                     _index[key] = new Entry(fatPath, dataOffset, (int)dataLen);
                 }
+                else
+                {
+                    // A texture NAME collides across two different archives (~0.8% of keys across the
+                    // reference client — e.g. overlapping content packs, localization variants). Plain
+                    // first-wins over Directory.EnumerateFiles order has no relation to quality and can
+                    // silently pin a common name to a much smaller copy (seen: "dirt" 256×256 in one
+                    // archive vs 32×32 in another) — keep whichever copy is actually higher-resolution.
+                    // Peeking just the DDS header (20 bytes) avoids decoding either candidate.
+                    long candidatePixels = ReadDdsPixelCountFrom(fs, dataOffset, dataLen);
+                    long existingPixels = TryReadDdsPixelCount(existing.Fat, existing.Offset, existing.Length);
+                    if (candidatePixels > existingPixels)
+                    {
+                        _index[key] = new Entry(fatPath, dataOffset, (int)dataLen);
+                    }
+                }
+
+                fs.Seek(dataOffset + dataLen, SeekOrigin.Begin); // skip to the next entry
             }
         }
+
+        // Reads the DDS header's width×height at the current archive's own already-open stream, without
+        // disturbing its position for the caller's subsequent seek-to-next-entry.
+        private static long ReadDdsPixelCountFrom(FileStream fs, long offset, uint length)
+        {
+            if (length < 20)
+            {
+                return 0;
+            }
+            long saved = fs.Position;
+            fs.Position = offset;
+            Span<byte> header = stackalloc byte[20];
+            int read = fs.Read(header);
+            fs.Position = saved;
+            return read == 20 ? DdsPixelCount(header) : 0;
+        }
+
+        // Same, but for an entry that may live in a DIFFERENT (already-processed) archive file.
+        private static long TryReadDdsPixelCount(string fatPath, long offset, int length)
+        {
+            if (length < 20)
+            {
+                return 0;
+            }
+            try
+            {
+                using FileStream fs = File.OpenRead(fatPath);
+                fs.Position = offset;
+                Span<byte> header = stackalloc byte[20];
+                return fs.Read(header) == 20 ? DdsPixelCount(header) : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static long DdsPixelCount(ReadOnlySpan<byte> header)
+        {
+            if (header[0] != (byte)'D' || header[1] != (byte)'D' || header[2] != (byte)'S' || header[3] != (byte)' ')
+            {
+                return 0;
+            }
+            uint height = ReadU32(header, 12);
+            uint width = ReadU32(header, 16);
+            return (long)width * height;
+        }
+
+        private static uint ReadU32(ReadOnlySpan<byte> b, int o) =>
+            (uint)b[o] | ((uint)b[o + 1] << 8) | ((uint)b[o + 2] << 16) | ((uint)b[o + 3] << 24);
 
         /// <summary>Resolve a section material name to a decoded DDS, or null if not found/decodable.</summary>
         public DdsImage? Resolve(string materialName) => ResolveNamed(materialName).Image;
@@ -138,6 +210,34 @@ namespace RaxicoreEditor.EngineAssets.Textures
                 }
             }
             return (null, null);
+        }
+
+        /// <summary>
+        /// The tiled detail texture + tile rate for a section material, or null if it has none. Unlike
+        /// <see cref="ResolveNamed"/>, this always queries the prefix before the last <c>'+'</c> — for an
+        /// object <c>"&lt;base&gt;+&lt;lightmap&gt;"</c> that's the same base material the albedo comes from,
+        /// but for a terrain blend <c>"&lt;mapCell&gt;+&lt;mapBlend&gt;"</c> the detail texture/tile rate live
+        /// on the map-cell record (e.g. <c>"map14"</c>), NOT the per-tile blend record (<c>"map140001"</c>,
+        /// which resolves the per-tile albedo but has no materials.adb entry of its own).
+        /// </summary>
+        public (byte[] Bgra, int Width, int Height, float TileRate)? ResolveDetail(string materialName)
+        {
+            if (string.IsNullOrEmpty(materialName) || _materials == null)
+            {
+                return null;
+            }
+            int plus = materialName.LastIndexOf('+');
+            string detailMat = plus > 0 ? materialName.Substring(0, plus) : materialName;
+            if (!_materials.TryGetDetail(detailMat, out string? detailTex, out float tileRate) || detailTex == null)
+            {
+                return null;
+            }
+            if (!_index.ContainsKey(detailTex))
+            {
+                return null;
+            }
+            DdsImage? img = Get(detailTex);
+            return img != null ? (img.Bgra, img.Width, img.Height, tileRate) : null;
         }
 
         /// <summary>Decode a texture by its exact index key (base name, no extension); cached. Null if absent.</summary>
