@@ -60,7 +60,7 @@
       <MenuItem>
         <MenuItem.Header><AccessText Text="_Generate" /></MenuItem.Header>
         <MenuItem Click="OnGenerateContinentExport"
-                  ToolTip.Tip="Continent terrain, facility layout and footprints for the PSFPortal map, plus an optional per-continent ground-height resource for PSF-LoginServer. Opens in a new tab.">
+                  ToolTip.Tip="Continent terrain, facility layout and footprints, plus an optional separate per-continent ground-height resource. Opens in a new tab.">
           <MenuItem.Header><AccessText Text="_Continent Export…" /></MenuItem.Header>
         </MenuItem>
         <MenuItem Click="OnGenerateListRecords"
@@ -685,7 +685,7 @@
               </Grid>
             </StackPanel>
             <StackPanel Spacing="4">
-              <TextBlock Text="Output folder (continent + footprint JSON for the portal)" FontSize="12"
+              <TextBlock Text="Output folder (continent + footprint JSON)" FontSize="12"
                          Foreground="{DynamicResource SubtleTextBrush}" />
               <Grid ColumnDefinitions="*,Auto">
                 <TextBox Grid.Column="0" Text="{Binding OutputDir, Mode=TwoWay}" />
@@ -693,10 +693,10 @@
                         Click="OnBrowseContinentExportOutput" />
               </Grid>
             </StackPanel>
-            <CheckBox Content="Also export terrain heights (for a PSF-LoginServer checkout)"
+            <CheckBox Content="Also export terrain heights (a separate ground-height resource)"
                       IsChecked="{Binding ExportTerrainHeights, Mode=TwoWay}" />
             <StackPanel Spacing="4" IsVisible="{Binding ExportTerrainHeights}">
-              <TextBlock Text="Terrain height output folder (src/main/resources/terrain)" FontSize="12"
+              <TextBlock Text="Terrain height output folder" FontSize="12"
                          Foreground="{DynamicResource SubtleTextBrush}" />
               <Grid ColumnDefinitions="*,Auto">
                 <TextBox Grid.Column="0" Text="{Binding TerrainOutputDir, Mode=TwoWay}" />

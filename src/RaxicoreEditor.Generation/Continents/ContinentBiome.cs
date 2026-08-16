@@ -8,13 +8,14 @@ namespace RaxicoreEditor.Generation.Continents
     /// sand tan, rock grey and so on.
     ///
     /// This is deliberately a CLASSIFICATION, not a colour sample: it emits one class byte per cell and
-    /// leaves the actual colours to the portal's theme. The classes come from the per-continent surface
-    /// name list in <c>mapNN_srf.pak</c> (<c>earth_grass</c>, <c>desert_scree</c>, <c>arctic_snow</c>, ...),
-    /// with the same name-index+1 cell-type correction documented on <see cref="ContinentRoads"/>.
+    /// leaves the actual colours to whatever renders the map. The classes come from the per-continent
+    /// surface name list in <c>mapNN_srf.pak</c> (<c>earth_grass</c>, <c>desert_scree</c>,
+    /// <c>arctic_snow</c>, ...), with the same name-index+1 cell-type correction documented on
+    /// <see cref="ContinentRoads"/>.
     /// </summary>
     internal sealed class ContinentBiome
     {
-        /// <summary>Broad ground classes; the portal maps each to a themed tint.</summary>
+        /// <summary>Broad ground classes; a consumer maps each to whatever tint it likes.</summary>
         public enum Class : byte
         {
             None = 0,

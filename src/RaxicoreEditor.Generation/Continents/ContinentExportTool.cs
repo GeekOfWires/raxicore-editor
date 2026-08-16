@@ -9,9 +9,11 @@ namespace RaxicoreEditor.Generation.Continents
     /// coarse water/lava/floor/pillar mask, a road network, broad ground classes, bridge decks, and a
     /// per-cell height grid), plus one shared file of per-facility-type top-down footprints.
     ///
-    /// This is the data the PSFPortal continent map turns into a coastline (ocean = transparent, inland
-    /// water = blue) behind the facility/SOI overlay. Ocean-vs-lake classification and the
-    /// marching-squares contouring happen downstream in scripts/build-continents.mjs.
+    /// This data is generic: nothing here assumes a particular consumer or how the output gets used --
+    /// a renderer, a map viewer, a game server, anything that wants continent geometry can read it. One
+    /// example of what a consumer might do with the water/lava/floor masks is turn them into a
+    /// coastline (ocean vs. inland water, land silhouette) via ocean-vs-lake classification and
+    /// marching-squares contouring, entirely downstream of this tool.
     ///
     /// Why the mesh and not <c>contents_mapNN.mpo</c>: the MPO's <c>map_water</c> layer only flags
     /// tiles that carry an <c>_oc</c> water-plane record (coast, rivers and lakes alike -- ~74% of
@@ -25,14 +27,14 @@ namespace RaxicoreEditor.Generation.Continents
     public static class ContinentExportTool
     {
         /// <param name="PlanetSideDir">The read-only reference client folder. Nothing under it is written.</param>
-        /// <param name="OutDir">Where the portal's per-continent JSON and footprints.json go.</param>
+        /// <param name="OutDir">Where the per-continent JSON and footprints.json go.</param>
         /// <param name="TerrainOutDir">
-        /// Optional: a per-continent absolute-height resource for the WORLD SERVER, not the portal. The
-        /// portal only ever needed contour LINES (traced downstream from <c>elevation</c> in the main
-        /// output); this is the raw height grid itself, so gameplay code -- an orbital strike deciding
-        /// where to draw its beam, say -- can look up real ground height instead of trusting whatever a
-        /// caller claims it is. Same source data as the main output's <c>elevation</c> field; this just
-        /// also writes it out anywhere the portal export doesn't already go.
+        /// Optional: writes the same per-continent height grid the main output's <c>elevation</c> field
+        /// already carries, a second time, to a separate folder. The main output is aimed at rendering a
+        /// map (contour lines, tinting); this is the raw grid itself, for anything that needs to look up
+        /// real per-cell ground height directly -- ground-truth data instead of an unverified caller's
+        /// claim about where the ground is, e.g. for placing an effect or a decal accurately. Any
+        /// consumer that wants this can read from here; it has no dependency on the main output folder.
         /// </param>
         public sealed record Options(string PlanetSideDir, string OutDir, string? TerrainOutDir = null);
 
@@ -200,13 +202,13 @@ namespace RaxicoreEditor.Generation.Continents
                     // surface pak).
                     roadN = roads?.N,
                     roads = roads != null ? Convert.ToBase64String(roads.Mask) : null,
-                    // Ground class per cell (see ContinentBiome.Class) -- the portal picks the tint
+                    // Ground class per cell (see ContinentBiome.Class) -- a consumer picks the tint
                     // colours.
                     biomeN = biome?.N,
                     biome = biome != null ? Convert.ToBase64String(biome.Cells) : null,
                     biomeFamily = biome?.Family,
                     // Per-cell terrain height, normalised 0..255, base64 (same N as the water mask). For
-                    // the portal's optional elevation contour overlay.
+                    // an optional elevation contour overlay, or anything else that wants coarse height.
                     elevationN = terrain.N,
                     elevation = Convert.ToBase64String(terrain.Elevation),
                     elevMin = terrain.ElevMin,
@@ -222,8 +224,9 @@ namespace RaxicoreEditor.Generation.Continents
                 if (terrainOutDir.Length > 0)
                 {
                     // Same grid, same encoding, same (worldSize, n) -> cell -> row-major m=j*n+i
-                    // convention as `elevation` above -- this is that field again, just also written
-                    // somewhere the world server reads from. Nothing here is re-derived or re-sampled.
+                    // convention as `elevation` above -- this is that field again, just also written to
+                    // its own folder for a consumer that only wants the raw heights. Nothing here is
+                    // re-derived or re-sampled.
                     var heightDoc = new
                     {
                         @base = baseName,

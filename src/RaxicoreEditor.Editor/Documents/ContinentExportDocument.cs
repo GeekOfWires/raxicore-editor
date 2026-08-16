@@ -6,8 +6,9 @@ using RaxicoreEditor.Generation.Continents;
 namespace RaxicoreEditor.Editor.Documents
 {
     /// <summary>
-    /// Generate tab for <see cref="ContinentExportTool"/>: continent terrain/facility JSON for the
-    /// portal, plus an optional per-continent height resource for the world server.
+    /// Generate tab for <see cref="ContinentExportTool"/>: per-continent terrain/facility JSON, plus an
+    /// optional separate per-continent ground-height resource. The output makes no assumption about who
+    /// consumes it -- any project that wants continent data can read it.
     /// </summary>
     public sealed class ContinentExportDocument : GenerationDocumentBase
     {
@@ -49,8 +50,8 @@ namespace RaxicoreEditor.Editor.Documents
         }
 
         /// <summary>
-        /// Also write a per-continent absolute-height resource -- for a PSF-LoginServer checkout's
-        /// <c>src/main/resources/terrain</c>, not for the portal.
+        /// Also write a per-continent ground-height resource to its own folder, separate from
+        /// <see cref="OutputDir"/> -- for anything that wants real per-cell height directly.
         /// </summary>
         public bool ExportTerrainHeights
         {
