@@ -192,7 +192,29 @@ namespace RaxicoreEditor.EngineAssets.Textures
                 _index.ContainsKey(def.Texture))
             {
                 DdsImage? img = Get(def.Texture);
-                if (img != null) return (img, def.Texture);
+                if (img != null && !IsFullyTransparent(def.Texture, img)) return (img, def.Texture);
+            }
+            // …except when the base material's texture is all-transparent AND the section's own record
+            // names one that isn't — then the section's record is the better albedo. Searhus's lava pools
+            // are the case in point: sections named "lava+lavalayer09" have their own materials.adb record
+            // naming "lavalayer09" (the orange lava sheet, alpha 37..204), but the base material "lava"
+            // names "moonlava" — a neutral-grey noise map, alpha 0 everywhere — which the viewport then
+            // force-opaqued and drew as flat grey rock, leaving the pools looking like empty craters.
+            //
+            // Note all-zero alpha does NOT by itself mean "not an albedo": plenty of genuinely opaque
+            // surface textures here store no alpha at all (bridge_road, lava_tiled), and the alpha-test
+            // discipline in MeshDocument force-opaques those so they render correctly. This is only a
+            // tie-break between two candidate records, never a reason to reject a texture outright.
+            // Deliberately narrow, and measured across all 16 continent models: of 13,655 distinct section
+            // materials exactly 3 change — "lava+lavalayer", "lava+lavalayer09" (Searhus lava, → the lava
+            // sheet) and "swamp+null" (Hossin, → cas006 swamp water). Every other material resolves
+            // byte-for-byte as before.
+            if (!string.Equals(baseMat, materialName, StringComparison.OrdinalIgnoreCase) &&
+                _materials?.Lookup(materialName) is MaterialsAdb.MaterialDef own && own.Texture != null &&
+                _index.ContainsKey(own.Texture))
+            {
+                DdsImage? img = Get(own.Texture);
+                if (img != null && !IsFullyTransparent(own.Texture, img)) return (img, own.Texture);
             }
             // The base material is very often itself the texture key.
             if (_index.ContainsKey(baseMat))
@@ -239,6 +261,24 @@ namespace RaxicoreEditor.EngineAssets.Textures
             DdsImage? img = Get(detailTex);
             return img != null ? (img.Bgra, img.Width, img.Height, tileRate) : null;
         }
+
+        // Cached per texture key: scanning a 512x512 alpha channel is cheap but happens on every section
+        // that resolves through the material DB, and the answer never changes for a given key.
+        private readonly ConcurrentDictionary<string, bool> _fullyTransparent = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>True when every texel's alpha is zero — a texture that can only be a utility/noise map,
+        /// never a surface albedo (see <see cref="ResolveNamed"/>).</summary>
+        private bool IsFullyTransparent(string key, DdsImage img) =>
+            _fullyTransparent.GetOrAdd(key, _ =>
+            {
+                byte[] p = img.Bgra;
+                if (p.Length < 4) return false;
+                for (int i = 3; i < p.Length; i += 4)
+                {
+                    if (p[i] != 0) return false;
+                }
+                return true;
+            });
 
         /// <summary>Decode a texture by its exact index key (base name, no extension); cached. Null if absent.</summary>
         public DdsImage? Get(string textureKey)

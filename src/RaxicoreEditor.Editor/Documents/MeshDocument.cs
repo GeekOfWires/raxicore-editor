@@ -1095,6 +1095,15 @@ namespace RaxicoreEditor.Editor.Documents
         // close, so "Detailed" never keeps one.
         private const uint BillboardLod = 1000;
 
+        // The LOD tag is stored unsigned, but a handful of meshes carry a NEGATIVE one: Searhus's five lava
+        // sheets are lod -49..-42, which reinterpreted as unsigned become ~4.29 billion and sail past the
+        // billboard test, so every lava pool was classified as a far impostor and dropped — leaving the
+        // craters as empty rock inlays while the water sheets beside them (plain lod 14) drew fine.
+        // Compare signed: a negative LOD is more detailed than 0, never a billboard. Measured across all 16
+        // continent models, exactly 5 of 35,925 meshes have a negative LOD and all 5 are those lava sheets,
+        // so nothing else changes.
+        private static bool IsBillboardLod(UberModel.Mesh mesh) => (int)mesh.Lod >= (int)BillboardLod;
+
         // Decide which of a system's meshes to build. A CMeshSystem stores every part of a model at every
         // LOD as a separate mesh; the mesh.Lod tag alone is unreliable (the exterior shell can be lod 36
         // while interior rooms are lod 14, or the reverse). The robust signal is the bounding box: meshes
@@ -1139,13 +1148,13 @@ namespace RaxicoreEditor.Editor.Documents
             {
                 if (used[i]) continue;
                 used[i] = true;
-                bool iElig = low || sys.Meshes[i].Lod < BillboardLod;
+                bool iElig = low || !IsBillboardLod(sys.Meshes[i]);
                 int best = iElig && verts[i] > 0 ? i : -1;
                 for (int j = i + 1; j < n; j++)
                 {
                     if (used[j] || !SimilarExtent(bmin[i], bmax[i], bmin[j], bmax[j])) continue;
                     used[j] = true;
-                    bool jElig = low || sys.Meshes[j].Lod < BillboardLod;
+                    bool jElig = low || !IsBillboardLod(sys.Meshes[j]);
                     if (!jElig || verts[j] == 0) continue;
                     if (best < 0 || (low ? verts[j] < verts[best] : verts[j] > verts[best])) best = j;
                 }
